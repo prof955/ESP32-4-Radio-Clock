@@ -1,0 +1,1519 @@
+// --- CODE VERSION: V13.00 --- // Refined Setup Sequence & Splash fix.
+
+#include <WiFiMulti.h>
+#include <SPI.h>
+#include <SD.h>
+#include <FS.h>
+#include <vector>
+#include <Arduino_GFX_Library.h>
+#include "ESP32_S3_4inch_Touch_Screen.h" // NOw includes SD Card Pin Definition & I2S Pin Definition
+#include "Audio.h"
+
+// --- Page Definition ---
+enum Page {
+    PAGE_MAIN,
+    PAGE_SETTINGS_MENU
+};
+
+// --- WiFi Credentials ---
+const char* ssid = "**********";
+const char* password = "*********";
+
+// --- Splash Screen Definitions --- Select your splash! Later select by settings page?
+//#define SPLASH_FILENAME "/Cassette_AI.bin"
+//#define SPLASH_FILENAME "/Cassette_AI_2.bin"
+#define SPLASH_FILENAME "/Splash_1.bin"
+//#define SPLASH_FILENAME "/Splash_2.bin"
+#define SPLASH_WIDTH 480
+//#define SPLASH_HEIGHT 290
+#define SPLASH_HEIGHT 480
+#define SPLASH_BUFFER_LINES 480
+
+// --- UI Color Palette ---
+#define COLOR_DARK_BLUE     0x1127
+#define COLOR_DARK_BLUE2    0x1125
+#define COLOR_GROOVE        0x31EA
+#define COLOR_BEIGE         0xF77B
+#define COLOR_ORANGE        0xEBC6
+#define COLOR_MEDIUM_BLUE   0x2BD5
+#define COLOR_DARK_TEAL     0x1A4A
+#define COLOR_YELLOW        0xEDC5
+#define COLOR_GREEN         0x348B
+#define COLOR_WHITE         0xFFFF
+#define COLOR_BLACK         0x0000
+#define COLOR_GREY          0x528A
+#define COLOR_RED           0xF800
+#define LIST_NAV_ACTIVE_BG  COLOR_ORANGE
+#define LIST_NAV_ICON_COLOR COLOR_DARK_BLUE
+#define LIST_NAV_INACTIVE_BG COLOR_GREY
+#define SETTINGS_BG_COLOR   COLOR_DARK_TEAL
+#define SETTINGS_BTN_OFF_BG COLOR_GREY
+#define SETTINGS_BTN_ON_BG  COLOR_MEDIUM_BLUE
+
+// --- UI Layout Definitions ---
+#define _SCREEN_WIDTH_CONST       480
+#define _SCREEN_HEIGHT_CONST      480
+#define LEFT_COL_WIDTH      280
+#define RIGHT_COL_WIDTH     (_SCREEN_WIDTH_CONST - LEFT_COL_WIDTH)
+#define TITLE_HEIGHT        40
+#define STATUS_AREA_HEIGHT  35
+#define CONTROLS_HEIGHT     165
+#define CONTROLS_START_Y  (_SCREEN_HEIGHT_CONST - CONTROLS_HEIGHT)
+
+// Button Layout
+#define BTN_SIZE          55
+#define BTN_SPACING       20
+#define ROW_SPACING       15
+#define BAR_SPACING       15
+#define MAIN_BTN_ROW_Y    (CONTROLS_START_Y + 10)
+#define SOUND_BTN_ROW_Y   (MAIN_BTN_ROW_Y + BTN_SIZE + ROW_SPACING)
+#define VOL_BAR_Y         (SOUND_BTN_ROW_Y + BTN_SIZE + BAR_SPACING)
+#define VOL_BAR_HEIGHT    12
+#define BTN_CENTER_X      (LEFT_COL_WIDTH / 2)
+#define PLAY_BTN_X        (BTN_CENTER_X - BTN_SIZE / 2)
+#define PREV_BTN_X        (PLAY_BTN_X - BTN_SPACING - BTN_SIZE)
+#define NEXT_BTN_X        (PLAY_BTN_X + BTN_SIZE + BTN_SPACING)
+#define VOL_DOWN_BTN_X    PREV_BTN_X
+#define MUTE_BTN_X        PLAY_BTN_X
+#define VOL_UP_BTN_X      NEXT_BTN_X
+#define VOL_BAR_WIDTH     ( (VOL_UP_BTN_X + BTN_SIZE) - VOL_DOWN_BTN_X )
+#define VOL_BAR_X         VOL_DOWN_BTN_X
+
+// Text Area Definitions
+#define NOW_PLAYING_TEXT_AREA_X 10
+#define NOW_PLAYING_TEXT_AREA_W (LEFT_COL_WIDTH - (2 * NOW_PLAYING_TEXT_AREA_X))
+#define SONG_TITLE_Y_POS    (TITLE_HEIGHT + 15)
+#define ARTIST_NAME_Y_POS   (CONTROLS_START_Y - 15 - 16)
+
+// Vinyl Graphic Layout
+#define VINYL_AREA_MARGIN_X 15
+#define VINYL_SPACING_Y     15
+
+// VU Meter Definitions
+#define VU_BAR_WIDTH        25
+#define VU_AREA_HEIGHT      CONTROLS_HEIGHT
+#define VU_BAR_Y_POS        CONTROLS_START_Y
+#define VU_MARGIN           6
+#define VU_LEFT_X           VU_MARGIN
+#define VU_RIGHT_X          (LEFT_COL_WIDTH - VU_MARGIN - VU_BAR_WIDTH)
+
+// List Definitions
+#define LIST_ITEM_HEIGHT 45
+#define LIST_START_Y (TITLE_HEIGHT)
+#define LIST_BOTTOM_LIMIT (_SCREEN_HEIGHT_CONST - STATUS_AREA_HEIGHT)
+#define ITEMS_PER_PAGE 9
+
+// List Navigation Buttons
+#define LIST_NAV_BTN_WIDTH  50
+#define LIST_NAV_BTN_HEIGHT 40
+#define LIST_NAV_BTN_MARGIN 0
+#define LIST_NAV_BTN_X      (_SCREEN_WIDTH_CONST - LIST_NAV_BTN_WIDTH - LIST_NAV_BTN_MARGIN)
+#define LIST_NAV_UP_Y       (LIST_START_Y + LIST_NAV_BTN_MARGIN)
+#define LIST_NAV_DOWN_Y     (LIST_BOTTOM_LIMIT - LIST_NAV_BTN_HEIGHT - LIST_NAV_BTN_MARGIN)
+
+// Status Area Buttons
+#define WIFI_ICON_SIZE      20
+#define STATUS_AREA_X       LEFT_COL_WIDTH
+#define STATUS_AREA_Y       (_SCREEN_HEIGHT_CONST - STATUS_AREA_HEIGHT)
+#define STATUS_AREA_W       RIGHT_COL_WIDTH
+#define STATUS_AREA_H       STATUS_AREA_HEIGHT
+#define WIFI_ICON_X         (STATUS_AREA_X + STATUS_AREA_W - WIFI_ICON_SIZE - 10)
+#define WIFI_ICON_Y         (STATUS_AREA_Y + (STATUS_AREA_H / 2) - (WIFI_ICON_SIZE / 2))
+#define SETTINGS_BTN_SIZE   30
+#define SETTINGS_BTN_MARGIN 10
+#define SETTINGS_BTN_X      (WIFI_ICON_X - SETTINGS_BTN_MARGIN - SETTINGS_BTN_SIZE)
+#define SETTINGS_BTN_Y      (STATUS_AREA_Y + (STATUS_AREA_H / 2) - (SETTINGS_BTN_SIZE / 2))
+
+// Settings Page Definitions
+#define SETTINGS_TITLE_Y      12
+#define SETTINGS_TITLE_LINE_Y (SETTINGS_TITLE_Y + 30 + 5)
+#define SETTINGS_TITLE_LINE_H 3
+#define SETTINGS_BACK_BTN_SIZE 40
+#define SETTINGS_BACK_BTN_X   20
+#define SETTINGS_BACK_BTN_Y   (SETTINGS_TITLE_Y - 8)
+#define SETTINGS_ITEM_Y_START (SETTINGS_TITLE_LINE_Y + 15)
+#define SETTINGS_ITEM_HEIGHT  60
+#define SETTINGS_LABEL_X      SETTINGS_BACK_BTN_X
+#define SETTINGS_VALUE_X      (_SCREEN_WIDTH_CONST / 2 - 20)
+#define SETTINGS_BTN_W        50
+#define SETTINGS_BTN_H        40
+#define SETTINGS_BTN_SPACING  10
+#define SETTINGS_BRIGHT_DOWN_X (SETTINGS_VALUE_X + 40)
+#define SETTINGS_BRIGHT_UP_X   (SETTINGS_BRIGHT_DOWN_X + SETTINGS_BTN_W + SETTINGS_BTN_SPACING)
+#define SETTINGS_BRIGHT_Y      (SETTINGS_ITEM_Y_START + (SETTINGS_ITEM_HEIGHT / 2) - (SETTINGS_BTN_H / 2))
+#define SETTINGS_VU_Y          (SETTINGS_ITEM_Y_START + SETTINGS_ITEM_HEIGHT + (SETTINGS_ITEM_HEIGHT / 2) - (SETTINGS_BTN_H / 2))
+#define SETTINGS_VU_TOGGLE_X   SETTINGS_BRIGHT_DOWN_X
+#define SETTINGS_VU_TOGGLE_W   (SETTINGS_BTN_W * 2 + SETTINGS_BTN_SPACING)
+
+// Brightness Constants
+#define BRIGHTNESS_LEVEL_MIN 1
+#define BRIGHTNESS_LEVEL_MAX 5
+#define BRIGHTNESS_PWM_MIN 205
+#define BRIGHTNESS_PWM_MAX 255
+#define BRIGHTNESS_PWM_STEP ((BRIGHTNESS_PWM_MAX - BRIGHTNESS_PWM_MIN) / (BRIGHTNESS_LEVEL_MAX - BRIGHTNESS_LEVEL_MIN))
+
+// Timing Constants
+#define TOUCH_DEBOUNCE_DELAY 200
+#define PAGE_TRANSITION_DELAY 50
+#define VU_UPDATE_INTERVAL 100
+
+// Global Variables for Touch Debounce
+unsigned long last_touch_time = 0;
+bool touch_processed_this_press = false;
+
+// Button Regions Structure
+struct ButtonRegion { int16_t x; int16_t y; int16_t w; int16_t h; const char* id; };
+
+// Station Info Structure
+struct StationInfo { String name; String url; };
+
+// Button Definitions
+ButtonRegion btnPrev    = {PREV_BTN_X, MAIN_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "prev"};
+ButtonRegion btnPlay    = {PLAY_BTN_X, MAIN_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "play"};
+ButtonRegion btnNext    = {NEXT_BTN_X, MAIN_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "next"};
+ButtonRegion btnVolDown = {VOL_DOWN_BTN_X, SOUND_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "voldown"};
+ButtonRegion btnMute    = {MUTE_BTN_X, SOUND_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "mute"};
+ButtonRegion btnVolUp   = {VOL_UP_BTN_X, SOUND_BTN_ROW_Y, BTN_SIZE, BTN_SIZE, "volup"};
+ButtonRegion btnListUp  = {LIST_NAV_BTN_X, LIST_NAV_UP_Y, LIST_NAV_BTN_WIDTH, LIST_NAV_BTN_HEIGHT, "listup"};
+ButtonRegion btnListDown= {LIST_NAV_BTN_X, LIST_NAV_DOWN_Y, LIST_NAV_BTN_WIDTH, LIST_NAV_BTN_HEIGHT, "listdown"};
+ButtonRegion btnSettings = {SETTINGS_BTN_X, SETTINGS_BTN_Y, SETTINGS_BTN_SIZE, SETTINGS_BTN_SIZE, "settings"};
+ButtonRegion btnSettingsBack = {SETTINGS_BACK_BTN_X, SETTINGS_BACK_BTN_Y, SETTINGS_BACK_BTN_SIZE, SETTINGS_BACK_BTN_SIZE, "set_back"};
+ButtonRegion btnBrightDown = {SETTINGS_BRIGHT_DOWN_X, SETTINGS_BRIGHT_Y, SETTINGS_BTN_W, SETTINGS_BTN_H, "bright_down"};
+ButtonRegion btnBrightUp   = {SETTINGS_BRIGHT_UP_X, SETTINGS_BRIGHT_Y, SETTINGS_BTN_W, SETTINGS_BTN_H, "bright_up"};
+ButtonRegion btnVuToggle   = {SETTINGS_VU_TOGGLE_X, SETTINGS_VU_Y, SETTINGS_VU_TOGGLE_W, SETTINGS_BTN_H, "vu_toggle"};
+
+// List Item Regions
+ButtonRegion listItems[ITEMS_PER_PAGE];
+
+// Enums
+enum ButtonIconType { ICON_NONE, ICON_PREV, ICON_PLAY, ICON_PAUSE, ICON_NEXT, ICON_VOL_DOWN, ICON_MUTE, ICON_VOL_UP, ICON_GEAR, ICON_UP_ARROW, ICON_DOWN_ARROW, ICON_BACK };
+enum ButtonShapeType { SHAPE_ROUND_RECT, SHAPE_RECT, SHAPE_CIRCLE };
+
+// File Paths
+const char* station_list_file = "/stations.txt";
+const char* settings_file = "/settings.txt";
+
+// --- Global Variables --- <<< FIXED: Added missing declarations >>>
+Page currentPage = PAGE_MAIN;
+bool initialDrawDone = false;
+Audio audio;
+WiFiMulti wifiMulti;
+bool sd_ok = false;
+bool wifi_connected = false;
+bool i2s_ok = false;
+bool is_muted = false;
+uint8_t last_volume = 15;
+std::vector<StationInfo> stations;
+int current_station_index = -1;
+String current_station_name = "No Station";
+String current_stream_title = "---";
+String current_artist_name = "";
+uint8_t last_vu_left = 0;
+uint8_t last_vu_right = 0;
+unsigned long last_vu_update = 0;
+int current_list_page = 0;      // <<< Declaration ADDED BACK
+int total_list_pages = 0;       // <<< Declaration ADDED BACK
+bool GOING_SETTINGS_MENU = false;
+uint8_t currentBrightness = BRIGHTNESS_PWM_MAX;
+bool vuMeterEnabled = true;
+
+// --- Function Declarations ---
+bool setupSDCard();
+bool setupWiFi();
+void setupAudio();
+bool loadStationsFromSD();
+void saveSettings();
+void loadSettings();
+void applyBrightness(uint8_t level);
+uint8_t mapBrightnessToLevel(uint8_t brightness);
+uint8_t mapLevelToBrightness(uint8_t level);
+void drawSplashScreen(const char* filename);
+void navigateToPage(Page newPage);
+void drawCurrentPage();
+void drawPageMain();
+void loopPageMain();
+void handleTouchPageMain(int x, int y);
+void drawPageSettingsMenu();
+void loopPageSettingsMenu();
+void handleTouchPageSettingsMenu(int x, int y);
+void drawBrightnessSetting();
+void redrawBrightnessValue();
+void drawVuSetting();
+void redrawVuToggleButton();
+void initializeListItemsRegion();
+void drawBaseUI();
+void updateLeftTitle();
+void drawNowPlayingArea(bool full_redraw = true);
+void drawControls(bool is_playing);
+void drawVolumeBar();
+void drawStationList();
+void drawStatusArea(bool draw_background = true);
+void drawVUMeter(uint8_t vu_left, uint8_t vu_right);
+void drawCenteredText(const String& text, int16_t x, int16_t y, int16_t w, int16_t h, uint16_t fgColor, uint16_t bgColor);
+void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, ButtonShapeType shape, uint16_t bgColor, uint16_t iconColor, ButtonIconType iconType, bool state = false);
+void drawButtonWithText(int16_t x, int16_t y, int16_t w, int16_t h, ButtonShapeType shape, uint16_t bgColor, uint16_t textColor, const char* text);
+void playStation(int index);
+void updateStreamTitle(const char *info);
+void audio_info(const char *info);
+void audio_eof_stream(const char *info);
+void audio_showstreamtitle(const char *info);
+
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(115200);
+    while (!Serial) {
+        delay(10);
+    }
+    Serial.println("\nESP32-S3 Internet Radio - V13.00 --- // Refined Setup Sequence & Splash fix.");
+
+    // 1. Init GFX (without backlight yet)
+    gfx->begin();
+    gfx->setRotation(3);
+    gfx->fillScreen(COLOR_BLACK); // Start black
+    Serial.println("Display Initialized.");
+
+    // 2. Configure Backlight Pin (but don't turn on)
+    #ifdef GFX_BL
+    pinMode(GFX_BL, OUTPUT);
+    digitalWrite(GFX_BL, LOW); // Keep it off initially
+    Serial.println("Backlight Pin Configured.");
+    #endif
+
+    // 3. Init SD Card
+    sd_ok = setupSDCard();
+    Serial.printf("SD Card: %s\n", sd_ok ? "OK" : "FAIL");
+
+    // 4. Load Settings (Requires SD)
+    if (sd_ok) {
+        loadSettings();
+    } else {
+        Serial.println("SD Error: Using default settings.");
+        // Ensure defaults if load fails
+        currentBrightness = BRIGHTNESS_PWM_MAX;
+        vuMeterEnabled = true;
+    }
+
+    // 5. Load Station List (Requires SD)
+    if (sd_ok) {
+        if (!loadStationsFromSD()) {
+            Serial.println("Failed to load stations.");
+        } else {
+            Serial.printf("Loaded %d stations.\n", stations.size());
+            total_list_pages = (stations.size() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+            Serial.printf("Total Pages: %d\n", total_list_pages);
+        }
+    }
+
+    // 6. Apply Brightness (This will turn on the backlight)
+    applyBrightness(currentBrightness);
+    Serial.printf("Initial Brightness Applied (PWM): %d\n", currentBrightness);
+    Serial.printf("Initial VU Meter State: %s\n", vuMeterEnabled ? "ON" : "OFF");
+
+    // 7. Draw Splash Screen (Requires SD)
+    if (sd_ok) {
+        drawSplashScreen(SPLASH_FILENAME);
+//        delay(1500); // Optional delay
+    } else {
+        // Fallback text if SD failed earlier
+        gfx->setCursor(50, 160);
+        gfx->setTextColor(COLOR_WHITE, COLOR_BLACK);
+        gfx->setTextSize(2);
+        gfx->println("SD Card Error!");
+        delay(2000);
+    }
+
+    // 8. Close SD Card before WiFi/Audio
+    if (sd_ok) {
+        SD.end();
+        Serial.println("SD Card explicitly closed before WiFi/Audio.");
+    }
+
+    // 9. Initialize Touch AFTER potential SD operations
+    initializeListItemsRegion(); // Depends only on defines
+    tp.begin();
+    tp.setRotation(ROTATION_INVERTED);
+    Serial.println("Touch Initialized.");
+
+    // 10. Initialize WiFi and Audio
+    setupAudio();
+    Serial.printf("Audio Init: %s\n", i2s_ok ? "OK" : "FAIL");
+    wifi_connected = setupWiFi();
+    Serial.printf("WiFi: %s\n", wifi_connected ? "Connected" : "FAIL");
+
+    // 11. Re-initialize SD Card for potential future use (optional but good practice)
+    if (sd_ok) { // Only if it was ok initially
+        Serial.print("Re-initializing SD card...");
+        // Re-use the original sd_ok flag status, if it failed before, don't try again
+        sd_ok = SD.begin(SD_CS_PIN, SPI); // Update sd_ok based on re-init result
+        if (!sd_ok) {
+             Serial.println(" Re-init Failed!");
+        } else {
+             Serial.println(" OK.");
+        }
+    }
+
+    // 12. Set initial page state for loop
+    currentPage = PAGE_MAIN;
+    initialDrawDone = false; // Drawing happens in loop
+
+    Serial.println("Setup complete. Loop will handle initial draw.");
+}
+
+// --- LOOP ---
+void loop() {
+    audio.loop();
+
+    if (!initialDrawDone) {
+        Serial.println("Performing initial page draw from loop...");
+        drawCurrentPage();
+        initialDrawDone = true;
+        Serial.println("Initial draw complete.");
+    }
+
+    switch (currentPage) {
+        case PAGE_MAIN:
+            loopPageMain();
+            break;
+        case PAGE_SETTINGS_MENU:
+            loopPageSettingsMenu();
+            break;
+        default:
+            currentPage = PAGE_MAIN;
+            initialDrawDone = false;
+            break;
+    }
+    delay(5);
+}
+
+// --- Page Management Functions ---
+
+void navigateToPage(Page newPage) {
+    if (newPage == currentPage && initialDrawDone) {
+        return;
+    }
+    Serial.printf("Navigating from Page %d to Page %d\n", currentPage, newPage);
+    currentPage = newPage;
+    drawCurrentPage();
+}
+
+void drawCurrentPage() {
+     Serial.printf("Drawing Page %d\n", currentPage);
+    switch (currentPage) {
+        case PAGE_MAIN:
+            drawPageMain();
+            break;
+        case PAGE_SETTINGS_MENU:
+            drawPageSettingsMenu();
+            break;
+        default:
+             gfx->fillScreen(COLOR_RED);
+             gfx->setCursor(10,10);
+             gfx->setTextColor(COLOR_WHITE);
+             gfx->setTextSize(2);
+             gfx->println("Unknown Page State!");
+            break;
+    }
+}
+
+// --- Page Specific Functions ---
+
+// --- PAGE_MAIN ---
+
+void drawPageMain() {
+    GOING_SETTINGS_MENU = false;
+    drawBaseUI();
+    updateLeftTitle();
+    drawNowPlayingArea(true);
+    drawControls(audio.isRunning());
+    drawStationList();
+    drawStatusArea(true);
+}
+
+void loopPageMain() {
+    // Touch Handling
+    tp.read();
+    if (tp.isTouched) {
+        unsigned long current_time = millis();
+        if ((current_time - last_touch_time > TOUCH_DEBOUNCE_DELAY) && !touch_processed_this_press) {
+            int tx = tp.points[0].x;
+            int ty = tp.points[0].y;
+            handleTouchPageMain(tx, ty);
+            last_touch_time = current_time;
+            touch_processed_this_press = true;
+        }
+    } else {
+        touch_processed_this_press = false;
+    }
+
+    // VU Meter Update
+    if (vuMeterEnabled && audio.isRunning() && !GOING_SETTINGS_MENU && millis() - last_vu_update > VU_UPDATE_INTERVAL) {
+        uint16_t vu_data = audio.getVUlevel();
+        uint8_t vu_left = vu_data >> 8;
+        uint8_t vu_right = vu_data & 0xFF;
+        if (abs(vu_left - last_vu_left) > 2 || abs(vu_right - last_vu_right) > 2) {
+            drawVUMeter(vu_left, vu_right);
+            last_vu_left = vu_left;
+            last_vu_right = vu_right;
+        }
+        last_vu_update = millis();
+    } else if (vuMeterEnabled && !audio.isRunning() && (last_vu_left != 0 || last_vu_right != 0)) {
+        drawVUMeter(0, 0);
+        last_vu_left = 0;
+        last_vu_right = 0;
+    }
+
+    // Serial Command Handling
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd == "stop") {
+            audio.stopSong();
+            current_station_index = -1;
+            current_stream_title = "Stopped";
+            current_artist_name = "";
+            updateLeftTitle();
+            drawNowPlayingArea(false);
+            drawControls(false);
+            Serial.println("Audio stopped.");
+        } else if (cmd == "pause") {
+            audio.pauseResume();
+            updateLeftTitle();
+            drawControls(audio.isRunning());
+            Serial.println("Audio pause/resume.");
+        } else if (cmd.startsWith("vol")) {
+            int vol = cmd.substring(3).toInt();
+            uint8_t max_vol = audio.maxVolume();
+            if (max_vol == 0) { max_vol = 21; }
+            if (vol >= 0 && vol <= max_vol) {
+                audio.setVolume(vol);
+                is_muted = (vol == 0);
+                last_volume = vol;
+                drawVolumeBar();
+                drawButton(btnMute.x, btnMute.y, btnMute.w, btnMute.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_MUTE, is_muted);
+                Serial.printf("Volume set to %d\n", vol);
+            }
+        } else if (cmd == "settings") {
+             GOING_SETTINGS_MENU = true;
+             if (vuMeterEnabled) {
+                drawVUMeter(0,0);
+                last_vu_left = 0;
+                last_vu_right = 0;
+             }
+             delay(PAGE_TRANSITION_DELAY);
+             navigateToPage(PAGE_SETTINGS_MENU);
+        } else if (cmd == "main") {
+             GOING_SETTINGS_MENU = false;
+             navigateToPage(PAGE_MAIN);
+        }
+    }
+}
+
+// <<< Reformatted handleTouchPageMain >>>
+void handleTouchPageMain(int x, int y) {
+    bool button_or_list_handled = false;
+
+    // --- 1. Check List Navigation Buttons ---
+    if (x >= LIST_NAV_BTN_X) {
+        if (y >= LIST_NAV_UP_Y && y < (LIST_NAV_UP_Y + LIST_NAV_BTN_HEIGHT)) {
+            button_or_list_handled = true;
+            if (current_list_page > 0) {
+                current_list_page--;
+                drawStationList();
+            }
+        } else if (y >= LIST_NAV_DOWN_Y && y < (LIST_NAV_DOWN_Y + LIST_NAV_BTN_HEIGHT)) {
+            button_or_list_handled = true;
+            if (current_list_page < total_list_pages - 1) {
+                current_list_page++;
+                drawStationList();
+            }
+        }
+    }
+
+    // --- 2. Check Control Buttons ---
+    if (!button_or_list_handled && y >= CONTROLS_START_Y) {
+        if (x > btnPrev.x && x < (btnPrev.x + btnPrev.w) && y > btnPrev.y && y < (btnPrev.y + btnPrev.h)) {
+            button_or_list_handled = true;
+            if (!stations.empty()) {
+                int idx = current_station_index;
+                if (idx == -1) { idx = stations.size() - 1; }
+                else { idx--; if (idx < 0) { idx = stations.size() - 1; } }
+                playStation(idx);
+            }
+        } else if (x > btnPlay.x && x < (btnPlay.x + btnPlay.w) && y > btnPlay.y && y < (btnPlay.y + btnPlay.h)) {
+            button_or_list_handled = true;
+            if (current_station_index != -1) {
+                bool is_error_state = (!audio.isRunning() && (current_stream_title == "Connection Failed" || current_stream_title == "Stream Ended" || current_stream_title == "Stopped" || current_stream_title == "WiFi Offline" || current_stream_title == "Audio Error"));
+                if (is_error_state) { playStation(current_station_index); }
+                else if (i2s_ok && wifi_connected) { audio.pauseResume(); updateLeftTitle(); drawControls(audio.isRunning()); }
+            }
+        } else if (x > btnNext.x && x < (btnNext.x + btnNext.w) && y > btnNext.y && y < (btnNext.y + btnNext.h)) {
+            button_or_list_handled = true;
+            if (!stations.empty()) {
+                int idx = current_station_index;
+                if (idx == -1) { idx = 0; }
+                else { idx++; if (idx >= stations.size()) { idx = 0; } }
+                playStation(idx);
+            }
+        } else if (x > btnVolDown.x && x < (btnVolDown.x + btnVolDown.w) && y > btnVolDown.y && y < (btnVolDown.y + btnVolDown.h)) {
+            button_or_list_handled = true;
+            uint8_t vol = audio.getVolume();
+            if (vol > 0) {
+                audio.setVolume(vol - 1);
+                is_muted = (audio.getVolume() == 0);
+                if(!is_muted) { last_volume = audio.getVolume(); }
+                drawVolumeBar();
+                drawButton(btnMute.x, btnMute.y, btnMute.w, btnMute.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_MUTE, is_muted);
+            }
+        } else if (x > btnMute.x && x < (btnMute.x + btnMute.w) && y > btnMute.y && y < (btnMute.y + btnMute.h)) {
+            button_or_list_handled = true;
+            if (is_muted) { audio.setVolume(last_volume); is_muted = false; }
+            else { last_volume = audio.getVolume(); audio.setVolume(0); is_muted = true; }
+            drawVolumeBar();
+            drawButton(btnMute.x, btnMute.y, btnMute.w, btnMute.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_MUTE, is_muted);
+        } else if (x > btnVolUp.x && x < (btnVolUp.x + btnVolUp.w) && y > btnVolUp.y && y < (btnVolUp.y + btnVolUp.h)) {
+            button_or_list_handled = true;
+            uint8_t vol = audio.getVolume();
+            uint8_t max_vol = audio.maxVolume(); if (max_vol == 0) { max_vol = 21; }
+            if (vol < max_vol) {
+                audio.setVolume(vol + 1);
+                is_muted = false; last_volume = audio.getVolume();
+                drawVolumeBar();
+                drawButton(btnMute.x, btnMute.y, btnMute.w, btnMute.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_MUTE, is_muted);
+            }
+        }
+    }
+
+    // --- 3. Check Station List Taps ---
+    if (!button_or_list_handled && x > LEFT_COL_WIDTH && y > LIST_START_Y && y < LIST_BOTTOM_LIMIT) {
+        int touched_item_slot = (y - LIST_START_Y) / LIST_ITEM_HEIGHT;
+        int actual_touched_index = (current_list_page * ITEMS_PER_PAGE) + touched_item_slot;
+        if (actual_touched_index >= 0 && actual_touched_index < stations.size()) {
+            bool x_is_valid = true;
+            if ((y >= LIST_NAV_UP_Y && y < (LIST_NAV_UP_Y + LIST_NAV_BTN_HEIGHT)) ||
+                (y >= LIST_NAV_DOWN_Y && y < (LIST_NAV_DOWN_Y + LIST_NAV_BTN_HEIGHT))) {
+                if (x >= LIST_NAV_BTN_X) { x_is_valid = false; }
+            }
+            if (x_is_valid) {
+                button_or_list_handled = true;
+                playStation(actual_touched_index);
+            }
+        }
+    }
+
+    // --- 4. Check Status Area Buttons (Settings) ---
+    if (!button_or_list_handled && y >= STATUS_AREA_Y && x >= STATUS_AREA_X) {
+        if (x > btnSettings.x && x < (btnSettings.x + btnSettings.w) &&
+            y > btnSettings.y && y < (btnSettings.y + btnSettings.h)) {
+            button_or_list_handled = true;
+            Serial.println("Settings Button Tapped");
+            GOING_SETTINGS_MENU = true;
+            if (vuMeterEnabled) { // Only clear if enabled
+                drawVUMeter(0, 0);
+                last_vu_left = 0;
+                last_vu_right = 0;
+            }
+            delay(PAGE_TRANSITION_DELAY); // Short delay
+            navigateToPage(PAGE_SETTINGS_MENU); // Navigate after clearing and delay
+        }
+    }
+}
+
+// --- PAGE_SETTINGS_MENU ---
+
+void drawPageSettingsMenu() {
+    gfx->fillScreen(SETTINGS_BG_COLOR);
+    gfx->setTextColor(COLOR_WHITE, SETTINGS_BG_COLOR);
+    gfx->setTextSize(3);
+    const char* title = "Settings";
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->getTextBounds(title, 0, 0, &tbx, &tby, &tbw, &tbh);
+    gfx->setCursor((_SCREEN_WIDTH_CONST - tbw) / 2, SETTINGS_TITLE_Y);
+    gfx->print(title);
+    drawButton(btnSettingsBack.x, btnSettingsBack.y, btnSettingsBack.w, btnSettingsBack.h,
+               SHAPE_RECT, COLOR_MEDIUM_BLUE, COLOR_WHITE, ICON_BACK);
+    gfx->fillRect(0, SETTINGS_TITLE_LINE_Y, _SCREEN_WIDTH_CONST, SETTINGS_TITLE_LINE_H, COLOR_ORANGE);
+    drawBrightnessSetting();
+    drawVuSetting();
+}
+
+void drawBrightnessSetting() {
+    int current_y = SETTINGS_ITEM_Y_START;
+    gfx->setTextSize(2);
+    gfx->setTextColor(COLOR_WHITE, SETTINGS_BG_COLOR);
+    gfx->setCursor(SETTINGS_LABEL_X, current_y + (SETTINGS_ITEM_HEIGHT / 2) - 8);
+    gfx->print("Brightness");
+    redrawBrightnessValue();
+    drawButton(btnBrightDown.x, btnBrightDown.y, btnBrightDown.w, btnBrightDown.h, SHAPE_RECT, COLOR_MEDIUM_BLUE, COLOR_WHITE, ICON_VOL_DOWN);
+    drawButton(btnBrightUp.x, btnBrightUp.y, btnBrightUp.w, btnBrightUp.h, SHAPE_RECT, COLOR_MEDIUM_BLUE, COLOR_WHITE, ICON_VOL_UP);
+}
+
+void drawVuSetting() {
+    int current_y = SETTINGS_ITEM_Y_START + SETTINGS_ITEM_HEIGHT;
+    gfx->setTextSize(2);
+    gfx->setTextColor(COLOR_WHITE, SETTINGS_BG_COLOR);
+    gfx->setCursor(SETTINGS_LABEL_X, current_y + (SETTINGS_ITEM_HEIGHT / 2) - 8);
+    gfx->print("VU Meter");
+    redrawVuToggleButton();
+}
+
+void redrawBrightnessValue() {
+    int current_y = SETTINGS_ITEM_Y_START;
+    int value_w = SETTINGS_BRIGHT_DOWN_X - SETTINGS_VALUE_X - 10;
+    gfx->fillRect(SETTINGS_VALUE_X, current_y, value_w, SETTINGS_ITEM_HEIGHT, SETTINGS_BG_COLOR);
+    gfx->setTextColor(COLOR_WHITE, SETTINGS_BG_COLOR);
+    gfx->setTextSize(2);
+    uint8_t currentLevel = mapBrightnessToLevel(currentBrightness);
+    String levelStr = String(currentLevel);
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->getTextBounds(levelStr.c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
+    gfx->setCursor(SETTINGS_VALUE_X + (value_w / 2) - (tbw / 2), current_y + (SETTINGS_ITEM_HEIGHT / 2) - (tbh / 2));
+    gfx->print(levelStr);
+}
+
+void redrawVuToggleButton() {
+    const char* btnText = vuMeterEnabled ? "ON" : "OFF";
+    uint16_t btnBgColor = vuMeterEnabled ? SETTINGS_BTN_ON_BG : SETTINGS_BTN_OFF_BG;
+    drawButtonWithText(btnVuToggle.x, btnVuToggle.y, btnVuToggle.w, btnVuToggle.h,
+                       SHAPE_RECT, btnBgColor, COLOR_WHITE, btnText);
+}
+
+void loopPageSettingsMenu() {
+    tp.read();
+    if (tp.isTouched) {
+        unsigned long current_time = millis();
+        if ((current_time - last_touch_time > TOUCH_DEBOUNCE_DELAY) && !touch_processed_this_press) {
+            int tx = tp.points[0].x;
+            int ty = tp.points[0].y;
+            handleTouchPageSettingsMenu(tx, ty);
+            last_touch_time = current_time;
+            touch_processed_this_press = true;
+        }
+    } else {
+        touch_processed_this_press = false;
+    }
+}
+
+void handleTouchPageSettingsMenu(int x, int y) {
+    bool button_handled = false;
+
+    // Check Back Button
+    if (x > btnSettingsBack.x && x < (btnSettingsBack.x + btnSettingsBack.w) &&
+        y > btnSettingsBack.y && y < (btnSettingsBack.y + btnSettingsBack.h)) {
+        button_handled = true;
+        Serial.println("Settings Back Button Tapped - Saving settings...");
+        saveSettings();
+        GOING_SETTINGS_MENU = false;
+        navigateToPage(PAGE_MAIN);
+    }
+
+    // Check Brightness Down Button
+    if (!button_handled && x > btnBrightDown.x && x < (btnBrightDown.x + btnBrightDown.w) &&
+        y > btnBrightDown.y && y < (btnBrightDown.y + btnBrightDown.h)) {
+        button_handled = true;
+        uint8_t currentLevel = mapBrightnessToLevel(currentBrightness);
+        if (currentLevel > BRIGHTNESS_LEVEL_MIN) {
+             currentLevel--;
+             currentBrightness = mapLevelToBrightness(currentLevel);
+             applyBrightness(currentBrightness);
+             redrawBrightnessValue();
+        }
+    }
+
+    // Check Brightness Up Button
+    if (!button_handled && x > btnBrightUp.x && x < (btnBrightUp.x + btnBrightUp.w) &&
+        y > btnBrightUp.y && y < (btnBrightUp.y + btnBrightUp.h)) {
+        button_handled = true;
+        uint8_t currentLevel = mapBrightnessToLevel(currentBrightness);
+        if (currentLevel < BRIGHTNESS_LEVEL_MAX) {
+             currentLevel++;
+             currentBrightness = mapLevelToBrightness(currentLevel);
+             applyBrightness(currentBrightness);
+             redrawBrightnessValue();
+        }
+    }
+
+    // Check VU Meter Toggle Button
+    if (!button_handled && x > btnVuToggle.x && x < (btnVuToggle.x + btnVuToggle.w) &&
+        y > btnVuToggle.y && y < (btnVuToggle.y + btnVuToggle.h)) {
+        button_handled = true;
+        vuMeterEnabled = !vuMeterEnabled;
+        Serial.printf("VU Meter Toggled: %s\n", vuMeterEnabled ? "ON" : "OFF");
+        redrawVuToggleButton();
+    }
+}
+
+
+// --- UI Drawing Helpers ---
+
+void initializeListItemsRegion() {
+    for (int i = 0; i < ITEMS_PER_PAGE; ++i) {
+        listItems[i].x = LEFT_COL_WIDTH;
+        listItems[i].y = LIST_START_Y + (i * LIST_ITEM_HEIGHT);
+        listItems[i].w = RIGHT_COL_WIDTH;
+        listItems[i].h = LIST_ITEM_HEIGHT;
+        listItems[i].id = "list_item";
+    }
+}
+
+// <<< Reformatted drawBaseUI >>>
+void drawBaseUI() {
+    gfx->fillRect(0, 0, LEFT_COL_WIDTH, _SCREEN_HEIGHT_CONST, COLOR_DARK_BLUE);
+    gfx->fillRect(LEFT_COL_WIDTH, 0, RIGHT_COL_WIDTH, _SCREEN_HEIGHT_CONST, COLOR_BEIGE);
+    gfx->fillRect(0, 0, LEFT_COL_WIDTH, TITLE_HEIGHT, COLOR_MEDIUM_BLUE);
+
+    // Draw Icon
+    int icon_x = 15; int icon_y_center = TITLE_HEIGHT / 2; int head_radius = 5;
+    int stem_height = 18; int stem_width = 3; int note_spacing = 12;
+    int note1_head_x = icon_x + head_radius;
+    int note1_head_y = icon_y_center + stem_height/2 - head_radius + 1;
+    int note1_stem_x = note1_head_x + head_radius - stem_width;
+    int note1_stem_y = note1_head_y - stem_height + head_radius;
+    gfx->fillCircle(note1_head_x, note1_head_y, head_radius, COLOR_WHITE);
+    gfx->fillRect(note1_stem_x, note1_stem_y, stem_width, stem_height, COLOR_WHITE);
+    int note2_head_x = note1_head_x + note_spacing;
+    int note2_head_y = note1_head_y;
+    int note2_stem_x = note2_head_x + head_radius - stem_width;
+    int note2_stem_y = note1_stem_y;
+    gfx->fillCircle(note2_head_x, note2_head_y, head_radius, COLOR_WHITE);
+    gfx->fillRect(note2_stem_x, note2_stem_y, stem_width, stem_height, COLOR_WHITE);
+    int flag_y1 = note1_stem_y;
+    int flag_y2 = flag_y1 + 3;
+    gfx->fillRect(note1_stem_x, flag_y1, (note2_stem_x + stem_width) - note1_stem_x, stem_width, COLOR_WHITE);
+    gfx->fillRect(note1_stem_x, flag_y2, (note2_stem_x + stem_width) - note1_stem_x, stem_width, COLOR_WHITE);
+
+    // Draw Right Title
+    gfx->fillRect(LEFT_COL_WIDTH, 0, RIGHT_COL_WIDTH, TITLE_HEIGHT, COLOR_ORANGE);
+    gfx->setTextColor(COLOR_DARK_BLUE, COLOR_ORANGE);
+    gfx->setTextSize(2);
+    const char* right_title_text = "Station List";
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->getTextBounds(right_title_text, 0, 0, &tbx, &tby, &tbw, &tbh);
+    int16_t text_x_right = LEFT_COL_WIDTH + (RIGHT_COL_WIDTH / 2) - (tbw / 2);
+    int16_t text_y_right = (TITLE_HEIGHT - tbh) / 2;
+    gfx->setCursor(text_x_right, text_y_right);
+    gfx->print(right_title_text);
+}
+
+// <<< Reformatted updateLeftTitle >>>
+void updateLeftTitle() {
+    String title_text;
+    uint8_t textSize = 2;
+    const int MAX_TITLE_CHARS = 18;
+
+    if (current_station_index != -1 && audio.isRunning()) {
+        title_text = current_station_name;
+    } else {
+        title_text = "Select Station";
+    }
+
+    if (title_text.length() > MAX_TITLE_CHARS) {
+        title_text = title_text.substring(0, MAX_TITLE_CHARS - 2) + "..";
+    }
+
+    int icon_approx_end_x = 15 + 5 + 12 + 5 + 5; // Approx 42
+    gfx->fillRect(icon_approx_end_x, 0, LEFT_COL_WIDTH - icon_approx_end_x, TITLE_HEIGHT, COLOR_MEDIUM_BLUE);
+    gfx->setTextColor(COLOR_WHITE, COLOR_MEDIUM_BLUE);
+    gfx->setTextSize(textSize);
+
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->getTextBounds(title_text.c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
+
+    int16_t text_x = (LEFT_COL_WIDTH / 2) - (tbw / 2); // Ideal center
+
+    int icon_x = 15; int head_radius = 5; int note_spacing = 12;
+    int note2_head_x = icon_x + head_radius + note_spacing;
+    int icon_physical_end_x = note2_head_x + head_radius; // Approx 37
+    int text_margin_left_from_icon = 10;
+    int min_text_x = icon_physical_end_x + text_margin_left_from_icon; // Approx 47
+
+    if (text_x < min_text_x) { // Apply icon constraint
+        text_x = min_text_x;
+    }
+    int text_margin_right = 10;
+    if (text_x + tbw > LEFT_COL_WIDTH - text_margin_right) { // Apply right margin constraint
+        text_x = LEFT_COL_WIDTH - text_margin_right - tbw;
+        if (text_x < min_text_x) { // Re-check icon constraint
+            text_x = min_text_x;
+        }
+    }
+
+    int16_t text_y = (TITLE_HEIGHT - tbh) / 2; // Vertical center
+    gfx->setCursor(text_x, text_y);
+    gfx->print(title_text);
+}
+
+// <<< Reformatted drawNowPlayingArea >>>
+void drawNowPlayingArea(bool full_redraw) {
+    int16_t tbx, tby; uint16_t tbw, tbh_title, tbh_artist;
+    gfx->setTextSize(2);
+    gfx->getTextBounds("Test", 0, 0, &tbx, &tby, &tbw, &tbh_title);
+    gfx->getTextBounds("Test", 0, 0, &tbx, &tby, &tbw, &tbh_artist);
+    int text_h = max(tbh_title, tbh_artist); if (text_h < 16) { text_h = 16; }
+    int song_title_y = SONG_TITLE_Y_POS;
+    int artist_name_y = ARTIST_NAME_Y_POS;
+    int space_between_texts = artist_name_y - (song_title_y + text_h);
+    int spacing_y = VINYL_SPACING_Y;
+    int vinyl_max_h = space_between_texts - (2 * spacing_y);
+    int vinyl_max_w = LEFT_COL_WIDTH - (2 * VINYL_AREA_MARGIN_X);
+    int square_size = min(vinyl_max_h, vinyl_max_w); if (square_size < 60) { square_size = 60; }
+    int square_y = (song_title_y + text_h) + spacing_y + (vinyl_max_h - square_size) / 2;
+    int square_x = (LEFT_COL_WIDTH - square_size) / 2;
+
+    if (full_redraw) {
+        gfx->fillRect(0, TITLE_HEIGHT, LEFT_COL_WIDTH, CONTROLS_START_Y - TITLE_HEIGHT, COLOR_DARK_BLUE);
+        int vinyl_cx = square_x + square_size / 2;
+        int vinyl_cy = square_y + square_size / 2;
+        int vinyl_outer_radius = square_size / 2;
+        int vinyl_base_radius = vinyl_outer_radius - 20; if (vinyl_base_radius < 10) { vinyl_base_radius = 10; }
+        int label_radius = vinyl_base_radius * 0.35; if (label_radius < 5) { label_radius = 5; }
+        int hole_radius = label_radius * 0.20; if (hole_radius < 2) { hole_radius = 2; }
+
+        gfx->fillRoundRect(vinyl_cx - vinyl_outer_radius, vinyl_cy - vinyl_outer_radius, vinyl_outer_radius * 2, vinyl_outer_radius * 2, 15, COLOR_ORANGE);
+        gfx->fillCircle(vinyl_cx, vinyl_cy, vinyl_base_radius, COLOR_DARK_BLUE2);
+
+        int num_grooves = 5;
+        int groove_start_radius = vinyl_base_radius - (vinyl_base_radius * 0.08);
+        int groove_end_radius = label_radius + (label_radius * 0.4);
+        for (int i = 0; i < num_grooves; ++i) {
+            int r = map(i, 0, num_grooves - 1, groove_start_radius, groove_end_radius);
+            if (r > label_radius + 2 && r < vinyl_base_radius) {
+                gfx->drawCircle(vinyl_cx, vinyl_cy, r, COLOR_GROOVE);
+            }
+        }
+        gfx->fillCircle(vinyl_cx, vinyl_cy, label_radius, COLOR_YELLOW);
+        gfx->fillCircle(vinyl_cx, vinyl_cy, hole_radius, COLOR_DARK_BLUE2);
+    }
+    drawCenteredText(current_stream_title, NOW_PLAYING_TEXT_AREA_X, song_title_y, NOW_PLAYING_TEXT_AREA_W, text_h + 4, COLOR_WHITE, COLOR_DARK_BLUE);
+    drawCenteredText(current_artist_name, NOW_PLAYING_TEXT_AREA_X, artist_name_y, NOW_PLAYING_TEXT_AREA_W, text_h + 4, COLOR_WHITE, COLOR_DARK_BLUE);
+}
+
+// <<< Reformatted drawControls >>>
+void drawControls(bool is_playing) {
+    gfx->fillRect(0, CONTROLS_START_Y, LEFT_COL_WIDTH, CONTROLS_HEIGHT, COLOR_DARK_BLUE2);
+
+    if (vuMeterEnabled) {
+        gfx->fillRect(VU_LEFT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_DARK_BLUE2);
+        gfx->drawRect(VU_LEFT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_GREY);
+        gfx->fillRect(VU_RIGHT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_DARK_BLUE2);
+        gfx->drawRect(VU_RIGHT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_GREY);
+        if (!is_playing) {
+            drawVUMeter(0,0);
+        }
+    } else {
+         gfx->fillRect(VU_LEFT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_DARK_BLUE2);
+         gfx->fillRect(VU_RIGHT_X, VU_BAR_Y_POS, VU_BAR_WIDTH, VU_AREA_HEIGHT, COLOR_DARK_BLUE2);
+    }
+
+    drawButton(btnPrev.x, btnPrev.y, btnPrev.w, btnPrev.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_PREV);
+    drawButton(btnPlay.x, btnPlay.y, btnPlay.w, btnPlay.h, SHAPE_ROUND_RECT, COLOR_MEDIUM_BLUE, COLOR_WHITE, is_playing ? ICON_PAUSE : ICON_PLAY);
+    drawButton(btnNext.x, btnNext.y, btnNext.w, btnNext.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_NEXT);
+    drawButton(btnVolDown.x, btnVolDown.y, btnVolDown.w, btnVolDown.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_VOL_DOWN);
+    drawButton(btnMute.x, btnMute.y, btnMute.w, btnMute.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_MUTE, is_muted);
+    drawButton(btnVolUp.x, btnVolUp.y, btnVolUp.w, btnVolUp.h, SHAPE_ROUND_RECT, COLOR_DARK_TEAL, COLOR_YELLOW, ICON_VOL_UP);
+    gfx->fillRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_WIDTH, VOL_BAR_HEIGHT, 5, COLOR_DARK_TEAL);
+    gfx->drawRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_WIDTH, VOL_BAR_HEIGHT, 5, COLOR_GREY);
+    drawVolumeBar();
+}
+
+// <<< Reformatted drawButton >>>
+void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, ButtonShapeType shape, uint16_t bgColor, uint16_t iconColor, ButtonIconType iconType, bool state) {
+    switch (shape) {
+        case SHAPE_RECT:       gfx->fillRect(x, y, w, h, bgColor); break;
+        case SHAPE_CIRCLE:     gfx->fillCircle(x + w / 2, y + h / 2, min(w,h) / 2, bgColor); break;
+        case SHAPE_ROUND_RECT: default: gfx->fillRoundRect(x, y, w, h, 8, bgColor); break;
+    }
+    int icon_inset = 15; int icon_line_width = 6;
+    if (iconType == ICON_UP_ARROW || iconType == ICON_DOWN_ARROW || iconType == ICON_BACK) { icon_inset = 8; icon_line_width = 4; }
+    if (iconType == ICON_GEAR) { icon_inset = 5; }
+    switch (iconType) {
+        case ICON_PREV: gfx->fillTriangle(x + w - icon_inset, y + icon_inset, x + w - icon_inset, y + h - icon_inset, x + icon_inset, y + h / 2, iconColor); gfx->fillRect(x + icon_inset, y + icon_inset, icon_line_width, h - 2 * icon_inset, iconColor); break;
+        case ICON_PLAY: gfx->fillTriangle(x + icon_inset + 3, y + icon_inset, x + icon_inset + 3, y + h - icon_inset, x + w - icon_inset, y + h / 2, iconColor); break;
+        case ICON_PAUSE: { int p_w = icon_line_width + 1; int p_g = 8; gfx->fillRect(x + (w / 2) - p_w - (p_g / 2), y + icon_inset, p_w, h - 2 * icon_inset, iconColor); gfx->fillRect(x + (w / 2) + (p_g / 2), y + icon_inset, p_w, h - 2 * icon_inset, iconColor); } break;
+        case ICON_NEXT: gfx->fillTriangle(x + icon_inset, y + icon_inset, x + icon_inset, y + h - icon_inset, x + w - icon_inset, y + h / 2, iconColor); gfx->fillRect(x + w - icon_inset - icon_line_width, y + icon_inset, icon_line_width, h - 2 * icon_inset, iconColor); break;
+        case ICON_VOL_DOWN: gfx->fillRect(x + icon_inset, y + h/2 - icon_line_width/2, w - 2*icon_inset, icon_line_width, iconColor); break;
+        case ICON_MUTE: { int sbw = w / 4 + 2; int sbh = h / 2 + 4; int sbx = x + icon_inset; int sby = y + (h - sbh)/2; int sctx = sbx + sbw; int scy1 = y + icon_inset; int scy2 = y + h - icon_inset; int sctrx = x + w - icon_inset - 4; int sctry = y + h / 2; gfx->fillRect(sbx, sby, sbw, sbh, iconColor); gfx->fillTriangle(sctx, scy1, sctx, scy2, sctrx, sctry, iconColor); if (state) { gfx->drawLine(sbx + 2 , scy1 + 2, sctrx - 2, scy2 - 2, COLOR_RED); gfx->drawLine(sbx + 3 , scy1 + 2, sctrx - 1, scy2 - 2, COLOR_RED); } } break;
+        case ICON_VOL_UP: gfx->fillRect(x + icon_inset, y + h/2 - icon_line_width/2, w - 2*icon_inset, icon_line_width, iconColor); gfx->fillRect(x + w/2 - icon_line_width/2, y + icon_inset, icon_line_width, h - 2*icon_inset, iconColor); break;
+        case ICON_GEAR: gfx->fillCircle(x + w/2, y + h/2, w/2 - icon_inset, iconColor); gfx->fillCircle(x + w/2, y + h/2, w/4 - icon_inset/2, bgColor); gfx->fillRect(x + w/2 - (w/8), y + h/2 - 1, w/4, 3, iconColor); gfx->fillRect(x + w/2 - 1, y + h/2 - (h/8), 3, h/4, iconColor); break;
+        case ICON_UP_ARROW: gfx->fillTriangle(x + w/2, y + icon_inset, x + icon_inset, y + h - icon_inset, x + w - icon_inset, y + h - icon_inset, iconColor); break;
+        case ICON_DOWN_ARROW: gfx->fillTriangle(x + w/2, y + h - icon_inset, x + icon_inset, y + icon_inset, x + w - icon_inset, y + icon_inset, iconColor); break;
+        case ICON_BACK: gfx->fillTriangle(x + icon_inset, y + h / 2, x + w - icon_inset, y + icon_inset, x + w - icon_inset, y + h - icon_inset, iconColor); break;
+        case ICON_NONE: default: break;
+    }
+}
+
+// <<< Reformatted drawButtonWithText >>>
+void drawButtonWithText(int16_t x, int16_t y, int16_t w, int16_t h, ButtonShapeType shape, uint16_t bgColor, uint16_t textColor, const char* text) {
+    switch (shape) {
+        case SHAPE_RECT:       gfx->fillRect(x, y, w, h, bgColor); break;
+        case SHAPE_CIRCLE:     gfx->fillCircle(x + w / 2, y + h / 2, min(w, h) / 2, bgColor); break;
+        case SHAPE_ROUND_RECT: default: gfx->fillRoundRect(x, y, w, h, 8, bgColor); break;
+    }
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->setTextSize(2);
+    gfx->setTextColor(textColor, bgColor);
+    gfx->getTextBounds(text, 0, 0, &tbx, &tby, &tbw, &tbh);
+    int16_t txPos = x + (w - tbw) / 2;
+    int16_t tyPos = y + (h - tbh) / 2; // Adjust Y based on text height
+    gfx->setCursor(txPos, tyPos);
+    gfx->print(text);
+}
+
+// <<< Reformatted drawVolumeBar >>>
+void drawVolumeBar() {
+    uint8_t current_vol = audio.getVolume();
+    uint8_t max_vol = audio.maxVolume(); if (max_vol == 0) { max_vol = 21; }
+    float percentage = (float)current_vol / max_vol;
+    int fill_width = (int)((VOL_BAR_WIDTH - 4) * percentage);
+    gfx->fillRect(VOL_BAR_X + 2, VOL_BAR_Y + 2, VOL_BAR_WIDTH - 4, VOL_BAR_HEIGHT - 4, COLOR_DARK_TEAL);
+    if (fill_width > 0) { gfx->fillRect(VOL_BAR_X + 2, VOL_BAR_Y + 2, fill_width, VOL_BAR_HEIGHT - 4, COLOR_YELLOW); }
+}
+
+// <<< Reformatted drawStationList >>>
+void drawStationList() {
+    int16_t list_start_x = LEFT_COL_WIDTH;
+    int16_t list_width = RIGHT_COL_WIDTH;
+    int16_t list_start_y_abs = LIST_START_Y;
+
+    gfx->fillRect(list_start_x, list_start_y_abs, list_width, LIST_BOTTOM_LIMIT - list_start_y_abs, COLOR_BEIGE);
+    gfx->setTextSize(2);
+
+    if (stations.empty()) {
+        gfx->setTextColor(COLOR_GREY, COLOR_BEIGE);
+        gfx->setCursor(list_start_x + 10, list_start_y_abs + 20);
+        gfx->print("No Stations");
+        return;
+    }
+
+    int start_index = current_list_page * ITEMS_PER_PAGE;
+    int end_index = min(start_index + ITEMS_PER_PAGE, (int)stations.size());
+    int y_pos = list_start_y_abs;
+
+    for (int i = start_index; i < end_index; ++i) {
+        if (i == current_station_index) {
+            gfx->fillRect(list_start_x, y_pos, list_width, LIST_ITEM_HEIGHT, COLOR_MEDIUM_BLUE);
+            gfx->setTextColor(COLOR_WHITE, COLOR_MEDIUM_BLUE);
+        } else {
+            gfx->fillRect(list_start_x, y_pos, list_width, LIST_ITEM_HEIGHT, COLOR_BEIGE);
+            gfx->setTextColor(COLOR_DARK_BLUE, COLOR_BEIGE);
+        }
+        gfx->setCursor(list_start_x + 10, y_pos + (LIST_ITEM_HEIGHT - 16) / 2);
+        gfx->print(stations[i].name.substring(0, 15));
+        y_pos += LIST_ITEM_HEIGHT;
+    }
+
+    if (total_list_pages > 1) {
+        uint16_t up_bg = (current_list_page > 0) ? LIST_NAV_ACTIVE_BG : LIST_NAV_INACTIVE_BG;
+        drawButton(btnListUp.x, btnListUp.y, btnListUp.w, btnListUp.h, SHAPE_RECT, up_bg, LIST_NAV_ICON_COLOR, ICON_UP_ARROW);
+        uint16_t down_bg = (current_list_page < total_list_pages - 1) ? LIST_NAV_ACTIVE_BG : LIST_NAV_INACTIVE_BG;
+        drawButton(btnListDown.x, btnListDown.y, btnListDown.w, btnListDown.h, SHAPE_RECT, down_bg, LIST_NAV_ICON_COLOR, ICON_DOWN_ARROW);
+
+        gfx->setTextSize(1);
+        String page_str = String(current_list_page + 1) + "/" + String(total_list_pages);
+        int16_t tbx, tby; uint16_t tbw, tbh;
+        gfx->getTextBounds(page_str.c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
+        int16_t px = LIST_NAV_BTN_X + (LIST_NAV_BTN_WIDTH / 2) - (tbw / 2);
+        int16_t py = LIST_NAV_UP_Y + LIST_NAV_BTN_HEIGHT + (LIST_NAV_DOWN_Y - (LIST_NAV_UP_Y + LIST_NAV_BTN_HEIGHT)) / 2 - (tbh / 2) ;
+        gfx->fillRect(px - 2, py - 2, tbw + 4, tbh + 4, COLOR_BEIGE);
+        gfx->setCursor(px, py);
+        gfx->setTextColor(COLOR_GREY, COLOR_BEIGE);
+        gfx->print(page_str);
+    }
+}
+
+// <<< Reformatted drawStatusArea >>>
+void drawStatusArea(bool draw_background) {
+    if (draw_background) {
+        gfx->fillRect(STATUS_AREA_X, STATUS_AREA_Y, STATUS_AREA_W, STATUS_AREA_H, COLOR_DARK_TEAL);
+    }
+    // Draw WiFi Icon
+    gfx->fillRect(WIFI_ICON_X, WIFI_ICON_Y, WIFI_ICON_SIZE, WIFI_ICON_SIZE, COLOR_DARK_TEAL); // Clear background
+    if (wifi_connected) {
+        gfx->drawPixel(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, COLOR_GREEN);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 5, 3, 225, 315, COLOR_GREEN);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 10, 8, 225, 315, COLOR_GREEN);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 15, 13, 225, 315, COLOR_GREEN);
+    } else {
+        gfx->drawPixel(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, COLOR_GREY);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 5, 3, 225, 315, COLOR_GREY);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 10, 8, 225, 315, COLOR_GREY);
+        gfx->drawArc(WIFI_ICON_X + 10, WIFI_ICON_Y + 18, 15, 13, 225, 315, COLOR_GREY);
+    }
+    // Draw Settings Button
+    drawButton(btnSettings.x, btnSettings.y, btnSettings.w, btnSettings.h, SHAPE_CIRCLE, COLOR_DARK_TEAL, COLOR_WHITE, ICON_GEAR);
+}
+
+// <<< Reformatted drawVUMeter >>>
+void drawVUMeter(uint8_t vu_left, uint8_t vu_right) {
+    int bar_height_left = map(vu_left, 0, 127, 0, VU_AREA_HEIGHT);
+    int bar_height_right = map(vu_right, 0, 127, 0, VU_AREA_HEIGHT);
+    bar_height_left = constrain(bar_height_left, 0, VU_AREA_HEIGHT);
+    bar_height_right = constrain(bar_height_right, 0, VU_AREA_HEIGHT);
+
+    uint16_t color_left = COLOR_GREEN;
+    if (bar_height_left > VU_AREA_HEIGHT * 0.6) { color_left = COLOR_YELLOW; }
+    if (bar_height_left > VU_AREA_HEIGHT * 0.85) { color_left = COLOR_RED; }
+    uint16_t color_right = COLOR_GREEN;
+    if (bar_height_right > VU_AREA_HEIGHT * 0.6) { color_right = COLOR_YELLOW; }
+    if (bar_height_right > VU_AREA_HEIGHT * 0.85) { color_right = COLOR_RED; }
+
+    gfx->fillRect(VU_LEFT_X + 1, VU_BAR_Y_POS + 1, VU_BAR_WIDTH - 2, VU_AREA_HEIGHT - 2, COLOR_DARK_BLUE2);
+    gfx->fillRect(VU_RIGHT_X + 1, VU_BAR_Y_POS + 1, VU_BAR_WIDTH - 2, VU_AREA_HEIGHT - 2, COLOR_DARK_BLUE2);
+
+    if (bar_height_left > 0) {
+        int draw_h = bar_height_left - 1; if (draw_h < 1) { draw_h = 1; }
+        int draw_y = VU_BAR_Y_POS + VU_AREA_HEIGHT - draw_h; if (draw_y < VU_BAR_Y_POS + 1) { draw_y = VU_BAR_Y_POS + 1; }
+        gfx->fillRect(VU_LEFT_X + 1, draw_y, VU_BAR_WIDTH - 2, draw_h, color_left);
+    }
+    if (bar_height_right > 0) {
+        int draw_h = bar_height_right - 1; if (draw_h < 1) { draw_h = 1; }
+        int draw_y = VU_BAR_Y_POS + VU_AREA_HEIGHT - draw_h; if (draw_y < VU_BAR_Y_POS + 1) { draw_y = VU_BAR_Y_POS + 1; }
+        gfx->fillRect(VU_RIGHT_X + 1, draw_y, VU_BAR_WIDTH - 2, draw_h, color_right);
+    }
+}
+
+// <<< Reformatted drawCenteredText >>>
+void drawCenteredText(const String& text, int16_t x, int16_t y, int16_t w, int16_t h, uint16_t fgColor, uint16_t bgColor) {
+    int16_t tbx, tby; uint16_t tbw, tbh;
+    gfx->setTextSize(2);
+    gfx->setTextColor(fgColor, bgColor);
+    gfx->getTextBounds(text.c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
+
+    gfx->fillRect(x, y, w, h, bgColor); // Clear background
+
+    int16_t cx = x + (w / 2) - (tbw / 2);
+    int16_t cy = y + (h / 2) - (tbh / 2) + 2; // Adjust for baseline
+
+    if (cx < x) { cx = x; } // Clamp left
+
+    if (tbw <= w) { // Fits?
+        gfx->setCursor(cx, cy);
+        gfx->print(text);
+    } else { // Doesn't fit
+        gfx->setCursor(x, cy);
+        int chars = w / 12; // Estimate chars
+        if(chars < 1) { chars = 1; }
+        gfx->print(text.substring(0, chars)); // Truncate
+    }
+}
+
+// --- System Setup and File I/O Functions ---
+
+// <<< Reformatted setupSDCard >>>
+bool setupSDCard() {
+    Serial.print("Initializing SD card...");
+    SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, -1);
+    if (!SD.begin(SD_CS_PIN, SPI)) {
+        Serial.println(" Card Mount Failed!");
+        return false;
+    }
+    Serial.println(" SD Card Initialized.");
+    uint8_t cardType = SD.cardType();
+    if (cardType == CARD_NONE) {
+        Serial.println(" No SD card attached");
+        return false;
+    }
+    Serial.print("SD Card Type: ");
+    if (cardType == CARD_MMC) { Serial.print("MMC"); }
+    else if (cardType == CARD_SD) { Serial.print("SDSC"); }
+    else if (cardType == CARD_SDHC) { Serial.print("SDHC"); }
+    else { Serial.print("UNKNOWN"); }
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf(" | Size: %lluMB\n", cardSize);
+    return true;
+}
+
+// <<< Reformatted setupWiFi >>>
+bool setupWiFi() {
+   Serial.print("Connecting to WiFi SSID: ");
+   Serial.print(ssid);
+   WiFi.mode(WIFI_STA);
+   wifiMulti.addAP(ssid, password);
+   int connect_timeout_ms = 15000;
+   Serial.print(" | Waiting for connection...");
+   if(wifiMulti.run(connect_timeout_ms) == WL_CONNECTED) {
+       Serial.print(" Connected! IP: ");
+       Serial.println(WiFi.localIP());
+       return true;
+   } else {
+       Serial.println(" Connection Failed!");
+       return false;
+   }
+}
+
+// <<< Reformatted setupAudio >>>
+void setupAudio() {
+    Serial.print("Configuring Audio Output (Audio.h)...");
+    audio.setPinout(I2S_BCLK_PIN, I2S_LRC_PIN, I2S_DOUT_PIN);
+    audio.setVolume(5);
+    last_volume = audio.getVolume();
+    is_muted = false;
+    Serial.println(" Done.");
+    i2s_ok = true;
+}
+
+// <<< Reformatted loadStationsFromSD >>>
+bool loadStationsFromSD() {
+    if (!sd_ok) {
+        Serial.println("SD card not initialized.");
+        return false;
+    }
+    File file = SD.open(station_list_file);
+    if (!file) {
+        Serial.printf("Failed to open file: %s\n", station_list_file);
+        return false;
+    }
+    Serial.printf("Reading stations from %s\n", station_list_file);
+    stations.clear();
+    while (file.available()) {
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0 || line.startsWith("#")) {
+            continue;
+        }
+        int commaIndex = line.indexOf(',');
+        if (commaIndex != -1) {
+            StationInfo station;
+            station.name = line.substring(0, commaIndex);
+            station.url = line.substring(commaIndex + 1);
+            station.name.trim();
+            station.url.trim();
+            if (station.name.length() > 0 && station.url.length() > 0 && station.url.startsWith("http")) {
+                stations.push_back(station);
+            } else {
+                Serial.printf("  Skipped invalid line: %s\n", line.c_str());
+            }
+        } else {
+            Serial.printf("  Skipped malformed line (no comma): %s\n", line.c_str());
+        }
+    }
+    file.close();
+    return !stations.empty();
+}
+
+// <<< Reformatted saveSettings >>>
+void saveSettings() {
+    if (!sd_ok) {
+        Serial.println("Cannot save settings: SD card not ready.");
+        return;
+    }
+    File file = SD.open(settings_file, FILE_WRITE);
+    if (!file) {
+        Serial.printf("Failed to open settings file for writing: %s\n", settings_file);
+        return;
+    }
+    file.println(currentBrightness);
+    file.println(vuMeterEnabled ? 1 : 0);
+    file.close();
+    Serial.printf("Settings saved (Bright: %d, VU: %d)\n", currentBrightness, vuMeterEnabled);
+}
+
+// <<< Reformatted loadSettings >>>
+void loadSettings() {
+    if (!sd_ok) {
+        Serial.println("Cannot load settings: SD card not ready.");
+        return;
+    }
+    File file = SD.open(settings_file);
+    if (!file) {
+        Serial.printf("Settings file not found: %s. Using defaults.\n", settings_file);
+        return;
+    }
+
+    Serial.printf("Loading settings from %s\n", settings_file);
+    bool brightness_loaded = false;
+    bool vu_loaded = false;
+
+    if (file.available()) { // Load Brightness (Line 1)
+        String line = file.readStringUntil('\n');
+        line.trim();
+        int loadedBrightness = line.toInt();
+        if (loadedBrightness >= BRIGHTNESS_PWM_MIN && loadedBrightness <= BRIGHTNESS_PWM_MAX) {
+            currentBrightness = loadedBrightness;
+            brightness_loaded = true;
+            Serial.printf("  Loaded Brightness (PWM): %d\n", currentBrightness);
+        } else {
+            Serial.printf("  Invalid brightness value: %s.\n", line.c_str());
+        }
+    } else {
+        Serial.println(" Settings file empty or missing brightness. Using defaults.");
+        file.close(); // Close file before returning
+        return;
+    }
+
+    if (file.available()) { // Load VU Meter State (Line 2)
+        String line = file.readStringUntil('\n');
+        line.trim();
+        if (line == "1") {
+            vuMeterEnabled = true;
+            vu_loaded = true;
+        } else if (line == "0") {
+            vuMeterEnabled = false;
+            vu_loaded = true;
+        } else {
+             Serial.printf("  Invalid VU meter value: %s.\n", line.c_str());
+        }
+         if (vu_loaded) {
+            Serial.printf("  Loaded VU Meter Enabled: %s\n", vuMeterEnabled ? "ON" : "OFF");
+         }
+    } else {
+         Serial.println(" Settings file missing VU state. Using default.");
+    }
+
+    file.close();
+
+    // Apply defaults if loading failed for any setting
+    if (!brightness_loaded) {
+        Serial.println("  Using default brightness.");
+        currentBrightness = BRIGHTNESS_PWM_MAX;
+    }
+    if (!vu_loaded) {
+         Serial.println("  Using default VU Meter state.");
+         vuMeterEnabled = true;
+    }
+}
+
+// <<< Reformatted applyBrightness >>>
+void applyBrightness(uint8_t level) {
+    #ifdef GFX_BL
+    ledcSetup(0, 5000, 8); // Channel 0, 5kHz, 8-bit resolution
+    ledcAttachPin(GFX_BL, 0); // Attach the GFX_BL pin to channel 0
+    ledcWrite(0, level); // Write the PWM value
+    Serial.printf("Brightness PWM set to %d\n", level);
+    #else
+    Serial.println("Backlight pin (GFX_BL) not defined.");
+    #endif
+}
+
+// <<< Reformatted mapBrightnessToLevel >>>
+uint8_t mapBrightnessToLevel(uint8_t brightness) {
+    brightness = constrain(brightness, BRIGHTNESS_PWM_MIN, BRIGHTNESS_PWM_MAX);
+    float pwm_range = BRIGHTNESS_PWM_MAX - BRIGHTNESS_PWM_MIN;
+    float level_range = BRIGHTNESS_LEVEL_MAX - BRIGHTNESS_LEVEL_MIN;
+    if (level_range == 0) return BRIGHTNESS_LEVEL_MIN; // Avoid division by zero
+    float step = pwm_range / level_range;
+    int level = round((float)(brightness - BRIGHTNESS_PWM_MIN) / step) + BRIGHTNESS_LEVEL_MIN;
+    return constrain(level, BRIGHTNESS_LEVEL_MIN, BRIGHTNESS_LEVEL_MAX);
+}
+
+// <<< Reformatted mapLevelToBrightness >>>
+uint8_t mapLevelToBrightness(uint8_t level) {
+    level = constrain(level, BRIGHTNESS_LEVEL_MIN, BRIGHTNESS_LEVEL_MAX);
+    int brightness = map(level, BRIGHTNESS_LEVEL_MIN, BRIGHTNESS_LEVEL_MAX, BRIGHTNESS_PWM_MIN, BRIGHTNESS_PWM_MAX);
+    return constrain(brightness, BRIGHTNESS_PWM_MIN, BRIGHTNESS_PWM_MAX);
+}
+
+// <<< Reformatted drawSplashScreen >>>
+void drawSplashScreen(const char* filename) {
+    if (!sd_ok) {
+        Serial.println("SD not available for splash screen");
+        return;
+    }
+    File bmpFile = SD.open(filename);
+    if (!bmpFile) {
+        Serial.printf("Splash file not found: %s\n", filename);
+        return;
+    }
+
+    Serial.printf("Drawing splash: %s (%d bytes)\n", filename, bmpFile.size());
+    unsigned long startTime = millis();
+
+    uint32_t bufferSize = SPLASH_WIDTH * SPLASH_BUFFER_LINES * 2;
+    uint16_t *buffer = NULL;
+
+    if (psramFound()) {
+        buffer = (uint16_t *)ps_malloc(bufferSize);
+    } else {
+        buffer = (uint16_t *)malloc(bufferSize);
+    }
+
+    if (!buffer) {
+        Serial.printf("Failed to allocate %d bytes for splash buffer!\n", bufferSize);
+        bmpFile.close();
+        return;
+    }
+
+    int16_t x = 0;
+    int16_t y = 0;/*(_SCREEN_HEIGHT_CONST - SPLASH_HEIGHT) / 2;*/ // Center vertically
+
+    uint32_t totalPixels = (uint32_t)SPLASH_WIDTH * SPLASH_HEIGHT;
+    uint32_t pixelsRead = 0;
+    uint32_t pixelsToRead;
+    size_t bytesRead;
+
+    gfx->startWrite();
+
+    while (pixelsRead < totalPixels) {
+        pixelsToRead = min((uint32_t)(totalPixels - pixelsRead), (uint32_t)(SPLASH_WIDTH * SPLASH_BUFFER_LINES));
+        bytesRead = bmpFile.read((uint8_t*)buffer, pixelsToRead * 2);
+
+        if (bytesRead == 0) {
+            Serial.println("Read error or end of file reached prematurely.");
+            break;
+        }
+
+        int linesRead = bytesRead / (SPLASH_WIDTH * 2);
+        int pixelsInChunk = linesRead * SPLASH_WIDTH;
+
+        if (pixelsInChunk > 0) {
+            gfx->draw16bitRGBBitmap(x, y, buffer, SPLASH_WIDTH, linesRead);
+            y += linesRead;
+            pixelsRead += pixelsInChunk;
+        } else {
+             Serial.println("Read less than a full line's worth of data.");
+             break;
+        }
+    }
+
+    gfx->endWrite();
+
+    if(buffer) {
+       free(buffer);
+    }
+    bmpFile.close();
+
+    Serial.printf("Splash screen drawn in %lu ms\n", millis() - startTime);
+}
+
+
+// --- Playback and Control Functions ---
+
+// <<< Reformatted playStation >>>
+void playStation(int index) {
+    if (index < 0 || index >= stations.size()) { return; }
+
+    if (!wifi_connected) {
+        Serial.println("WiFi Offline");
+        current_stream_title = "WiFi Offline"; current_artist_name = "";
+        current_station_index = index; current_station_name = stations[index].name;
+        updateLeftTitle(); drawNowPlayingArea(false); drawControls(false); drawStationList();
+        return;
+    }
+    if (!i2s_ok) {
+        Serial.println("Audio Error");
+        current_stream_title = "Audio Error"; current_artist_name = "";
+        current_station_index = index; current_station_name = stations[index].name;
+        updateLeftTitle(); drawNowPlayingArea(false); drawControls(false); drawStationList();
+        return;
+    }
+
+    Serial.printf("Play: %s\n", stations[index].name.c_str());
+    audio.stopSong();
+
+    current_station_index = index;
+    current_station_name = stations[index].name;
+    current_stream_title = "Connecting...";
+    current_artist_name = "";
+
+    updateLeftTitle();
+    drawStationList();
+    drawNowPlayingArea(false);
+    drawControls(false);
+
+    if (audio.connecttohost(stations[index].url.c_str())) {
+        Serial.println("OK");
+        current_stream_title = "Loading...";
+        current_artist_name = "";
+        updateLeftTitle();
+        drawNowPlayingArea(false);
+        drawControls(true);
+    } else {
+        Serial.println("Fail");
+        current_stream_title = "Connection Failed";
+        current_artist_name = "";
+        updateLeftTitle();
+        drawNowPlayingArea(false);
+        drawControls(false);
+    }
+}
+
+// --- Audio Library Event Callbacks & Metadata Parsing ---
+
+void audio_info(const char *info){ Serial.printf("Audio Info: %s\n", info); }
+
+void audio_showstreamtitle(const char *info){
+    updateStreamTitle(info);
+    if (currentPage == PAGE_MAIN) {
+        drawNowPlayingArea(false);
+        updateLeftTitle();
+    }
+}
+
+void audio_eof_stream(const char *info) {
+    Serial.printf("End of Stream: %s\n", info);
+    current_stream_title = "Stream Ended";
+    current_artist_name = "";
+    if (currentPage == PAGE_MAIN) {
+        updateLeftTitle();
+        drawNowPlayingArea(false);
+        drawControls(false);
+    }
+}
+
+// <<< Reformatted updateStreamTitle >>>
+void updateStreamTitle(const char *info) {
+    String title_info = String(info);
+    title_info.trim();
+    String parsed_artist = "";
+    String parsed_title = "";
+    bool update_globals = false;
+
+    int start = title_info.indexOf("StreamTitle='");
+    if (start != -1) {
+        start += 13;
+        int end = title_info.indexOf("';", start);
+        if (end != -1) {
+            String full_title = title_info.substring(start, end);
+            full_title.trim();
+            int separator = full_title.indexOf(" - ");
+            if (separator > 0 && separator < full_title.length() - 3) {
+                parsed_artist = full_title.substring(0, separator);
+                parsed_title = full_title.substring(separator + 3);
+                parsed_artist.trim();
+                parsed_title.trim();
+                update_globals = true;
+            } else {
+                parsed_title = full_title;
+                parsed_artist = current_station_name;
+                update_globals = true;
+            }
+        } else {
+            update_globals = false;
+        }
+    }
+
+    if (!update_globals) {
+        int direct_separator = title_info.indexOf(" - ");
+        if (direct_separator > 0 && direct_separator < title_info.length() - 3) {
+            parsed_artist = title_info.substring(0, direct_separator);
+            parsed_title = title_info.substring(direct_separator + 3);
+            parsed_artist.trim();
+            parsed_title.trim();
+            update_globals = true;
+        }
+    }
+
+    if (!update_globals) {
+        bool is_loading_or_error = (current_stream_title == "Connecting..." ||
+                                    current_stream_title == "Loading Title..." ||
+                                    current_stream_title == "---" ||
+                                    current_stream_title == "Connection Failed" ||
+                                    current_stream_title == "Stream Ended" ||
+                                    current_stream_title == "WiFi Offline" ||
+                                    current_stream_title == "Audio Error");
+        if (is_loading_or_error) {
+             if(title_info.length() > 0 && title_info.length() < 50 && !title_info.startsWith("icy-")) {
+                parsed_title = title_info;
+                parsed_artist = current_station_name;
+                update_globals = true;
+             }
+        }
+    }
+
+    if (update_globals) {
+        if (current_artist_name != parsed_artist || current_stream_title != parsed_title) {
+            current_artist_name = parsed_artist;
+            current_stream_title = parsed_title;
+        }
+    }
+}
